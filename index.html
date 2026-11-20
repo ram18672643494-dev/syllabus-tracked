@@ -1,0 +1,617 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#F3F4F7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0F121B" media="(prefers-color-scheme: dark)">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>Syllabus Tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: one narrow column, like a study planner. A summary on top, then one ruled sheet per subject.
+     Each topic carries an OMR-style bubble: empty = not started, half = studied, filled with a tick = revised. */
+  :root {
+    --bg: #F3F4F7;
+    --surface: #FFFFFF;
+    --ink: #161B2E;
+    --muted: #5C6377;
+    --line: #DCE0E9;
+    --track: #E6E9F0;
+    --studied: #2B57DF;
+    --revised: #0B8A68;
+    --warn: #A85A06;
+    --warn-bg: #FBF0E0;
+    --crit: #BC3434;
+    --crit-bg: #FBE8E8;
+    --on-accent: #FFFFFF;
+    --font-body: 'Instrument Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    --font-mono: 'IBM Plex Mono', ui-monospace, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0F121B;
+      --surface: #181C28;
+      --ink: #E8EAF2;
+      --muted: #9AA1B5;
+      --line: #2A3042;
+      --track: #262C3D;
+      --studied: #7C9BFF;
+      --revised: #3DD0A4;
+      --warn: #E8A04A;
+      --warn-bg: #33261A;
+      --crit: #FF8080;
+      --crit-bg: #3A1F24;
+      --on-accent: #0F121B;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0F121B;
+    --surface: #181C28;
+    --ink: #E8EAF2;
+    --muted: #9AA1B5;
+    --line: #2A3042;
+    --track: #262C3D;
+    --studied: #7C9BFF;
+    --revised: #3DD0A4;
+    --warn: #E8A04A;
+    --warn-bg: #33261A;
+    --crit: #FF8080;
+    --crit-bg: #3A1F24;
+    --on-accent: #0F121B;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 15px;
+    line-height: 1.45;
+    padding-block: 20px 72px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+  .wrap { max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+  button, input, textarea { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  :focus-visible { outline: 2px solid var(--studied); outline-offset: 2px; border-radius: 6px; }
+
+  .top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  h1 { margin: 0; font-size: 20px; font-weight: 650; letter-spacing: -0.01em; text-wrap: balance; }
+  .sync { font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); display: inline-flex; align-items: center; gap: 6px; }
+  .sync::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+  .sync[data-k="synced"]::before { background: var(--revised); }
+  .sync[data-k="saving"]::before { background: var(--studied); }
+  .sync[data-k="error"]::before, .sync[data-k="slow"]::before { background: var(--warn); }
+
+  .summary { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+  .big { display: flex; align-items: baseline; gap: 8px; }
+  .num { font-family: var(--font-mono); font-size: 44px; line-height: 1; font-weight: 500; font-variant-numeric: tabular-nums; }
+  .unit { color: var(--muted); font-size: 14px; }
+  .sum-line, .next { margin: 0; color: var(--muted); font-size: 13.5px; }
+  .next strong { color: var(--ink); font-weight: 600; }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12.5px; color: var(--muted); }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+  .legend .l-rv { background: var(--revised); }
+  .legend .l-st { background: var(--studied); }
+  .legend .l-td { background: var(--track); }
+
+  .bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--track); }
+  .bar i { display: block; height: 100%; }
+  .bar .b-rv { background: var(--revised); }
+  .bar .b-st { background: var(--studied); }
+
+  .banner { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; border: 1px dashed var(--line); border-radius: 10px; padding: 10px 12px; font-size: 13.5px; color: var(--muted); }
+
+  .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; min-width: 0; }
+  .fchip { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 6px 12px; font-size: 13px; display: inline-flex; gap: 6px; align-items: center; min-height: 34px; }
+  .fchip .n { font-family: var(--font-mono); font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .fchip[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  .fchip[aria-pressed="true"] .n { color: var(--bg); opacity: 0.8; }
+
+  .btn { border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 8px 14px; min-height: 38px; font-weight: 500; }
+  .btn:hover { border-color: var(--muted); }
+  .btn.primary { background: var(--studied); border-color: var(--studied); color: var(--on-accent); }
+  .btn.danger { color: var(--crit); }
+  .btn.ghost { background: transparent; }
+
+  .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+  .panel label { display: flex; flex-direction: column; gap: 5px; font-size: 13px; color: var(--muted); }
+  .field { border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 9px 11px; min-height: 40px; width: 100%; color: var(--ink); }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+  .list { display: flex; flex-direction: column; gap: 12px; }
+  .sub { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px 14px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .sub-head { display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; }
+  .sub-toggle { display: inline-flex; align-items: center; gap: 8px; background: none; border: 0; padding: 4px 0; min-height: 36px; text-align: left; font-weight: 600; font-size: 16px; min-width: 0; }
+  .sub-name { overflow-wrap: anywhere; }
+  .chev { flex: none; transition: transform 0.15s; }
+  .chev path { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .sub-toggle[aria-expanded="true"] .chev { transform: rotate(90deg); }
+  .chip { font-family: var(--font-mono); font-size: 12px; padding: 3px 9px; border-radius: 999px; background: var(--track); color: var(--muted); white-space: nowrap; }
+  .chip-warn { background: var(--warn-bg); color: var(--warn); }
+  .chip-crit { background: var(--crit-bg); color: var(--crit); }
+  .chip-past { opacity: 0.7; }
+  .sub-meta { display: flex; gap: 14px; font-family: var(--font-mono); font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .sub-meta .pct { margin-left: auto; color: var(--ink); }
+
+  .topics { list-style: none; margin: 4px 0 0; padding: 0; }
+  .topic { display: flex; align-items: center; border-top: 1px solid var(--line); }
+  .topic-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; background: none; border: 0; padding: 9px 0; min-height: 46px; text-align: left; }
+  .t-title { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .t-tag { font-family: var(--font-mono); font-size: 11px; color: var(--muted); flex: none; }
+  .topic.s2 .t-title { color: var(--muted); }
+  .bubble { flex: none; }
+  .bubble .b-ring { fill: none; stroke: currentColor; stroke-width: 2; }
+  .bubble .b-fill { fill: currentColor; stroke: none; }
+  .bubble .b-tick { fill: none; stroke: var(--surface); stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+  .s0 .bubble { color: var(--muted); }
+  .s1 .bubble { color: var(--studied); }
+  .s2 .bubble { color: var(--revised); }
+  .x { flex: none; width: 40px; height: 40px; background: none; border: 0; color: var(--muted); font-size: 20px; line-height: 1; border-radius: 8px; }
+  .x:hover { color: var(--crit); }
+  .empty-note { border-top: 1px solid var(--line); padding: 12px 0 2px; color: var(--muted); font-size: 13.5px; }
+
+  .add-topic { display: flex; gap: 8px; align-items: flex-start; border-top: 1px solid var(--line); padding-top: 12px; }
+  .add-topic textarea { flex: 1; min-width: 0; resize: none; overflow: hidden; }
+  .sub-foot { display: flex; gap: 10px 14px; align-items: center; justify-content: space-between; flex-wrap: wrap; border-top: 1px solid var(--line); padding-top: 12px; font-size: 13px; color: var(--muted); }
+  .sub-foot label { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .sub-foot .field { width: auto; min-height: 36px; padding: 6px 9px; }
+  .confirm { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; color: var(--ink); }
+
+  .empty { background: var(--surface); border: 1px dashed var(--line); border-radius: 12px; padding: 28px 16px; text-align: center; display: flex; flex-direction: column; gap: 12px; align-items: center; color: var(--muted); }
+  .empty p { margin: 0; }
+
+  #toast { position: fixed; left: 0; right: 0; bottom: 0; padding: 0 max(16px, env(safe-area-inset-left, 0px)) calc(16px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-right, 0px)); display: flex; justify-content: center; pointer-events: none; }
+  #toast[hidden] { display: none; }
+  .toast-in { pointer-events: auto; background: var(--ink); color: var(--bg); border-radius: 10px; padding: 10px 14px; display: flex; gap: 16px; align-items: center; font-size: 14px; box-shadow: 0 6px 24px rgba(0,0,0,0.25); }
+  .toast-btn { background: none; border: 0; color: inherit; font-weight: 700; text-decoration: underline; padding: 4px; min-height: 32px; }
+
+  @media (prefers-reduced-motion: reduce) { .chev { transition: none; } }
+  @media (max-width: 420px) { .num { font-size: 38px; } .sub { padding-left: 12px; padding-right: 12px; } }
+</style>
+<style>html{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}</style>
+</head>
+<body>
+
+<div class="wrap">
+  <div class="top">
+    <h1>Syllabus Tracker</h1>
+    <span id="sync" class="sync" data-k="local" role="status">Saved on this device</span>
+  </div>
+  <div id="app"></div>
+</div>
+<div id="toast" hidden role="status"></div>
+
+<script>
+(function () {
+  'use strict';
+
+  var LS_KEY = 'syllabus-tracker-v1';
+  var STATUS = ['Not started', 'Studied', 'Revised'];
+  var SYNC_TXT = {
+    local: 'Saved on this device',
+    saving: 'Saving…',
+    synced: 'Saved to your account',
+    error: "Couldn't sync, saved on this device",
+    slow: 'Account not reachable yet, saved on this device'
+  };
+
+  var app = document.getElementById('app');
+  var syncEl = document.getElementById('sync');
+  var toastEl = document.getElementById('toast');
+
+  function uid() { return Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-3); }
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  function clone(o) { return JSON.parse(JSON.stringify(o)); }
+
+  /* ---------- dates ---------- */
+  function ymd(d) {
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+  function addDays(n) { var d = new Date(); d.setDate(d.getDate() + n); return ymd(d); }
+  function parseYmd(s) { var p = s.split('-'); return new Date(+p[0], +p[1] - 1, +p[2]); }
+  function daysUntil(s) {
+    if (!s) return null;
+    var now = new Date();
+    var today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    return Math.round((parseYmd(s) - today) / 864e5);
+  }
+  function fmtDate(s) {
+    var d = parseYmd(s);
+    var opts = { day: 'numeric', month: 'short' };
+    if (d.getFullYear() !== new Date().getFullYear()) opts.year = 'numeric';
+    return d.toLocaleDateString(undefined, opts);
+  }
+
+  /* ---------- data ---------- */
+  function seed() {
+    function T(titles, st) {
+      return titles.map(function (t, i) { return { id: uid(), t: t, s: st[i] || 0 }; });
+    }
+    return { subjects: [
+      { id: uid(), name: 'Physics', exam: addDays(18), sample: true, topics: T(
+        ['Kinematics', "Newton's laws and friction", 'Work, energy and power', 'Rotational motion', 'Gravitation', 'Thermodynamics', 'Electrostatics', 'Current electricity', 'Magnetic effects of current', 'Ray and wave optics'],
+        [2, 2, 1, 1, 0, 0, 0, 0, 0, 0]) },
+      { id: uid(), name: 'Organic Chemistry', exam: addDays(25), sample: true, topics: T(
+        ['IUPAC nomenclature', 'Isomerism', 'Reaction mechanisms', 'Hydrocarbons', 'Haloalkanes and haloarenes', 'Alcohols, phenols and ethers', 'Aldehydes and ketones', 'Amines'],
+        [2, 1, 1, 0, 0, 0, 0, 0]) },
+      { id: uid(), name: 'Calculus', exam: addDays(9), sample: true, topics: T(
+        ['Limits and continuity', 'Differentiation rules', 'Applications of derivatives', 'Definite integrals', 'Integration techniques', 'Differential equations'],
+        [2, 2, 2, 1, 0, 0]) }
+    ] };
+  }
+  function normalize(d) {
+    var subs = (d && Array.isArray(d.subjects)) ? d.subjects : [];
+    return { subjects: subs.map(function (s) {
+      return {
+        id: String(s.id || uid()), name: String(s.name || 'Untitled'), exam: s.exam ? String(s.exam) : '',
+        sample: !!s.sample,
+        topics: (Array.isArray(s.topics) ? s.topics : []).map(function (t) {
+          var n = +t.s; return { id: String(t.id || uid()), t: String(t.t || ''), s: (n === 1 || n === 2) ? n : 0 };
+        })
+      };
+    }) };
+  }
+  function loadLocal() {
+    try { var raw = localStorage.getItem(LS_KEY); if (raw) return normalize(JSON.parse(raw)); } catch (e) {}
+    return null;
+  }
+  function saveLocal() { try { localStorage.setItem(LS_KEY, JSON.stringify(state)); } catch (e) {} }
+
+  var state = loadLocal() || seed();
+  var ui = { open: {}, filter: 'all', adding: false, confirm: null, drafts: {}, focus: null };
+  if (state.subjects.length) ui.open[state.subjects[0].id] = true;
+
+  function findSub(id) { return state.subjects.filter(function (s) { return s.id === id; })[0]; }
+  function findTopic(s, id) { return s.topics.filter(function (t) { return t.id === id; })[0]; }
+
+  /* ---------- counts ---------- */
+  function counts(subs) {
+    var n = 0, st = 0, rv = 0, td = 0, tr = 0;
+    subs.forEach(function (s) {
+      s.topics.forEach(function (t) {
+        n++;
+        if (t.s >= 1) st++;
+        if (t.s === 2) rv++;
+        if (t.s === 0) td++;
+        if (t.s === 1) tr++;
+      });
+    });
+    return { n: n, st: st, rv: rv, td: td, tr: tr };
+  }
+  function pct(a, b) { return b ? Math.round(a / b * 100) : 0; }
+  function bar(c) {
+    var rv = c.n ? c.rv / c.n * 100 : 0;
+    var so = c.n ? (c.st - c.rv) / c.n * 100 : 0;
+    return '<div class="bar" role="img" aria-label="' + c.rv + ' revised, ' + (c.st - c.rv) + ' studied, ' + (c.n - c.st) + ' not started">' +
+      '<i class="b-rv" style="width:' + rv + '%"></i><i class="b-st" style="width:' + so + '%"></i></div>';
+  }
+
+  /* ---------- rendering ---------- */
+  function bubble(s) {
+    return '<svg class="bubble" viewBox="0 0 24 24" width="26" height="26" aria-hidden="true">' +
+      '<circle class="b-ring" cx="12" cy="12" r="10"/>' +
+      (s === 1 ? '<path class="b-fill" d="M12 2a10 10 0 0 0 0 20z"/>' : '') +
+      (s === 2 ? '<circle class="b-fill" cx="12" cy="12" r="10"/><path class="b-tick" d="M7.5 12.5l3 3 6-6.5"/>' : '') +
+      '</svg>';
+  }
+  function examChip(s) {
+    var d = daysUntil(s.exam);
+    if (d === null) return '<span class="chip">No exam date</span>';
+    var cls = '', txt;
+    if (d < 0) { txt = 'Exam over'; cls = 'chip-past'; }
+    else if (d === 0) { txt = 'Exam today'; cls = 'chip-crit'; }
+    else { txt = d + (d === 1 ? ' day left' : ' days left'); cls = d <= 7 ? 'chip-crit' : (d <= 21 ? 'chip-warn' : ''); }
+    return '<span class="chip ' + cls + '">' + txt + ' · ' + fmtDate(s.exam) + '</span>';
+  }
+  function matchesFilter(t) {
+    return ui.filter === 'all' || (ui.filter === 'todo' && t.s === 0) || (ui.filter === 'revise' && t.s === 1) || (ui.filter === 'done' && t.s === 2);
+  }
+
+  function summaryHTML() {
+    var c = counts(state.subjects);
+    var next = null;
+    state.subjects.forEach(function (s) {
+      var d = daysUntil(s.exam);
+      if (d !== null && d >= 0 && (!next || d < next.d)) next = { d: d, name: s.name };
+    });
+    var h = '<section class="summary" aria-label="Overall progress">' +
+      '<div class="big"><span class="num">' + pct(c.st, c.n) + '</span><span class="unit">% of topics studied</span></div>' +
+      bar(c) +
+      '<div class="legend"><span><i class="l-rv"></i>Revised ' + c.rv + '</span><span><i class="l-st"></i>Studied ' + (c.st - c.rv) + '</span><span><i class="l-td"></i>To do ' + c.td + '</span></div>';
+    if (next) {
+      h += '<p class="next">Next exam: <strong>' + esc(next.name) + '</strong> ' +
+        (next.d === 0 ? 'is today' : 'in ' + next.d + (next.d === 1 ? ' day' : ' days')) + '</p>';
+    }
+    return h + '</section>';
+  }
+
+  function subjectHTML(s) {
+    var c = counts([s]);
+    var open = !!ui.open[s.id];
+    var h = '<article class="sub" data-sid="' + s.id + '">' +
+      '<div class="sub-head">' +
+      '<button type="button" class="sub-toggle" data-act="toggle" data-key="tg-' + s.id + '" aria-expanded="' + open + '">' +
+      '<svg class="chev" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M5 3l5 5-5 5"/></svg>' +
+      '<span class="sub-name">' + esc(s.name) + '</span></button>' + examChip(s) + '</div>' +
+      bar(c) +
+      '<div class="sub-meta"><span>' + c.st + '/' + c.n + ' studied</span><span>' + c.rv + ' revised</span><span class="pct">' + pct(c.st, c.n) + '%</span></div>';
+    if (open) {
+      var vis = s.topics.filter(matchesFilter);
+      if (vis.length) {
+        h += '<ul class="topics">';
+        vis.forEach(function (t) {
+          var next = STATUS[(t.s + 1) % 3].toLowerCase();
+          h += '<li class="topic s' + t.s + '">' +
+            '<button type="button" class="topic-main" data-act="cycle" data-tid="' + t.id + '" data-key="cy-' + t.id + '" aria-label="' + esc(t.t) + ': ' + STATUS[t.s].toLowerCase() + '. Tap to mark ' + next + '.">' +
+            bubble(t.s) + '<span class="t-title">' + esc(t.t) + '</span>' +
+            (t.s ? '<span class="t-tag">' + STATUS[t.s] + '</span>' : '') + '</button>' +
+            '<button type="button" class="x" data-act="del-topic" data-tid="' + t.id + '" data-key="dt-' + t.id + '" aria-label="Delete ' + esc(t.t) + '">×</button></li>';
+        });
+        h += '</ul>';
+      } else {
+        h += '<div class="empty-note">' + (s.topics.length ? 'No topics match this filter.' : 'No topics yet. Add the first one below.') + '</div>';
+      }
+      var draft = ui.drafts['nt-' + s.id] || '';
+      h += '<form class="add-topic" data-form="topic" data-sid="' + s.id + '">' +
+        '<textarea class="field" id="nt-' + s.id + '" data-draft="nt-' + s.id + '" data-key="nt-' + s.id + '" rows="1" enterkeyhint="done" aria-label="Add a topic to ' + esc(s.name) + '" placeholder="Add a topic, or paste a list with one per line">' + esc(draft) + '</textarea>' +
+        '<button type="submit" class="btn primary">Add</button></form>';
+      h += '<div class="sub-foot"><label>Exam date <input type="date" class="field" id="ed-' + s.id + '" data-key="ed-' + s.id + '" data-change="exam" value="' + esc(s.exam) + '"></label>';
+      if (ui.confirm === s.id) {
+        h += '<div class="confirm"><span>Delete this subject and its ' + s.topics.length + ' topics?</span>' +
+          '<button type="button" class="btn danger" data-act="del-yes" data-key="dy-' + s.id + '">Delete</button>' +
+          '<button type="button" class="btn ghost" data-act="del-no" data-key="dn-' + s.id + '">Keep</button></div>';
+      } else {
+        h += '<button type="button" class="btn ghost danger" data-act="del-ask" data-key="da-' + s.id + '">Delete subject</button>';
+      }
+      h += '</div>';
+    }
+    return h + '</article>';
+  }
+
+  function toolbarHTML() {
+    var c = counts(state.subjects);
+    function chip(f, label, n) {
+      return '<button type="button" class="fchip" data-act="filter" data-f="' + f + '" data-key="f-' + f + '" aria-pressed="' + (ui.filter === f) + '">' + label + ' <span class="n">' + n + '</span></button>';
+    }
+    return '<div class="toolbar"><div class="chips" role="group" aria-label="Filter topics">' +
+      chip('all', 'All', c.n) + chip('todo', 'To do', c.td) + chip('revise', 'To revise', c.tr) + chip('done', 'Revised', c.rv) +
+      '</div><button type="button" class="btn" data-act="add-subject" data-key="add-subject">' + (ui.adding ? 'Close' : 'Add subject') + '</button></div>';
+  }
+
+  function addFormHTML() {
+    return '<form class="panel" data-form="subject" id="subj-form">' +
+      '<label>Subject name<input class="field" id="subj-name" data-draft="subj-name" data-key="subj-name" maxlength="60" autocomplete="off" required placeholder="e.g. Constitutional Law" value="' + esc(ui.drafts['subj-name'] || '') + '"></label>' +
+      '<label>Exam date (optional)<input class="field" type="date" id="subj-date" data-draft="subj-date" data-key="subj-date" value="' + esc(ui.drafts['subj-date'] || '') + '"></label>' +
+      '<div class="row"><button type="submit" class="btn primary">Add subject</button><button type="button" class="btn ghost" data-act="add-subject">Cancel</button></div></form>';
+  }
+
+  function render() {
+    var ak = document.activeElement && document.activeElement.getAttribute ? document.activeElement.getAttribute('data-key') : null;
+    var hasSamples = state.subjects.some(function (s) { return s.sample; });
+    var h = summaryHTML();
+    if (hasSamples) {
+      h += '<div class="banner"><span>These subjects are samples to show how it works.</span>' +
+        '<button type="button" class="btn" data-act="clear-samples" data-key="clear-samples">Clear samples</button></div>';
+    }
+    h += toolbarHTML();
+    if (ui.adding) h += addFormHTML();
+    if (state.subjects.length) {
+      h += '<div class="list">' + state.subjects.map(subjectHTML).join('') + '</div>';
+    } else if (!ui.adding) {
+      h += '<div class="empty"><p>No subjects yet. Add each subject on your exam, then list its topics.</p>' +
+        '<button type="button" class="btn primary" data-act="add-subject">Add your first subject</button></div>';
+    }
+    var wrapper = '<div class="wrap-inner" style="display:flex;flex-direction:column;gap:16px">' + h + '</div>';
+    app.innerHTML = wrapper;
+    Array.prototype.forEach.call(app.querySelectorAll('textarea'), autosize);
+    var target = ui.focus || ak;
+    ui.focus = null;
+    if (target) {
+      var el = app.querySelector('[data-key="' + target + '"]');
+      if (el) {
+        el.focus();
+        if (el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && el.type === 'text')) {
+          try { var l = el.value.length; el.setSelectionRange(l, l); } catch (e) {}
+        }
+      }
+    }
+  }
+  function autosize(t) { t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight + 2, 160) + 'px'; }
+
+  /* ---------- persistence ---------- */
+  var doc = null, timer = null, saving = false, again = false, dirty = false, myRev = '', loadTimer = null;
+
+  function setSync(k) { syncEl.textContent = SYNC_TXT[k]; syncEl.setAttribute('data-k', k); }
+
+  function queueSave() {
+    dirty = true;
+    saveLocal();
+    setSync(doc ? 'saving' : 'local');
+    clearTimeout(timer);
+    timer = setTimeout(flush, 500);
+  }
+  async function flush() {
+    timer = null;
+    if (!doc) { dirty = false; setSync('local'); return; }
+    if (saving) { again = true; return; }
+    saving = true;
+    var ok = true;
+    do {
+      again = false;
+      myRev = uid();
+      try { await doc.set({ rev: myRev, subjects: clone(state.subjects) }); } catch (e) { ok = false; }
+    } while (again);
+    saving = false;
+    dirty = !!timer;
+    if (!timer) setSync(ok ? 'synced' : 'error');
+  }
+  function change() { queueSave(); render(); }
+
+  async function connect() {
+    try {
+      if (!window.claude || !window.claude.use) return;
+      var db = await window.claude.use('db');
+      var user = await window.claude.use('user');
+      if (!db || !user) return;
+      var id = await user.id();
+      if (!id) return;
+      doc = db.collection('data/users/' + id).doc('syllabus');
+      loadTimer = setTimeout(function () { if (!saving) setSync('slow'); }, 10000);
+      doc.onSnapshot(function (snap) {
+        if (snap.metadata.hasPendingWrites) return;
+        if (!snap.metadata.fromCache) { clearTimeout(loadTimer); }
+        var d = snap.exists ? snap.data() : null;
+        if (!d) { if (!snap.metadata.fromCache) setSync(dirty ? 'saving' : 'local'); return; }
+        if (d.rev === myRev) { if (!timer && !saving) setSync('synced'); return; }
+        if (dirty || saving) return;
+        state = normalize(clone(d));
+        saveLocal();
+        setSync('synced');
+        render();
+      }, function () { clearTimeout(loadTimer); setSync('error'); });
+    } catch (e) { /* stay on device-only storage */ }
+  }
+
+  /* ---------- toast ---------- */
+  var toastTimer = null, toastUndo = null;
+  function hideToast() { toastEl.hidden = true; toastEl.innerHTML = ''; toastUndo = null; }
+  function toast(msg, undo) {
+    clearTimeout(toastTimer);
+    toastUndo = undo || null;
+    toastEl.innerHTML = '<div class="toast-in"><span>' + esc(msg) + '</span>' +
+      (undo ? '<button type="button" class="toast-btn" data-toast="undo">Undo</button>' : '') + '</div>';
+    toastEl.hidden = false;
+    toastTimer = setTimeout(hideToast, 6000);
+  }
+  toastEl.addEventListener('click', function (e) {
+    if (e.target.closest('[data-toast="undo"]') && toastUndo) { var fn = toastUndo; hideToast(); fn(); }
+  });
+
+  /* ---------- events ---------- */
+  function parseTopics(text) {
+    return text.split(/\r?\n/).map(function (l) {
+      return l.replace(/^\s*(?:[-*•–]|\d+[.)])\s*/, '').trim();
+    }).filter(Boolean).map(function (l) { return l.slice(0, 200); });
+  }
+
+  app.addEventListener('click', function (e) {
+    var b = e.target.closest('[data-act]');
+    if (!b) return;
+    var act = b.getAttribute('data-act');
+    var art = b.closest('[data-sid]');
+    var sid = art ? art.getAttribute('data-sid') : null;
+    var s = sid ? findSub(sid) : null;
+    var tid = b.getAttribute('data-tid');
+
+    if (act === 'toggle' && s) { ui.open[sid] = !ui.open[sid]; render(); }
+    else if (act === 'cycle' && s) { var t = findTopic(s, tid); if (t) { t.s = (t.s + 1) % 3; change(); } }
+    else if (act === 'del-topic' && s) {
+      var idx = s.topics.map(function (x) { return x.id; }).indexOf(tid);
+      if (idx > -1) {
+        var removed = s.topics.splice(idx, 1)[0];
+        change();
+        toast('Topic deleted', function () {
+          var again2 = findSub(sid);
+          if (again2) { again2.topics.splice(Math.min(idx, again2.topics.length), 0, removed); change(); }
+        });
+      }
+    }
+    else if (act === 'del-ask' && s) { ui.confirm = sid; ui.focus = 'dn-' + sid; render(); }
+    else if (act === 'del-no') { ui.confirm = null; ui.focus = 'da-' + sid; render(); }
+    else if (act === 'del-yes' && s) {
+      var si = state.subjects.indexOf(s);
+      state.subjects.splice(si, 1);
+      ui.confirm = null;
+      change();
+      toast('Subject deleted', function () { state.subjects.splice(Math.min(si, state.subjects.length), 0, s); change(); });
+    }
+    else if (act === 'filter') { ui.filter = b.getAttribute('data-f'); render(); }
+    else if (act === 'add-subject') { ui.adding = !ui.adding; if (ui.adding) ui.focus = 'subj-name'; render(); }
+    else if (act === 'clear-samples') {
+      var removedSamples = state.subjects.filter(function (x) { return x.sample; });
+      state.subjects = state.subjects.filter(function (x) { return !x.sample; });
+      change();
+      toast('Samples cleared', function () { state.subjects = removedSamples.concat(state.subjects); change(); });
+    }
+  });
+
+  app.addEventListener('submit', function (e) {
+    var f = e.target.closest('[data-form]');
+    if (!f) return;
+    e.preventDefault();
+    var kind = f.getAttribute('data-form');
+    if (kind === 'subject') {
+      var name = (ui.drafts['subj-name'] || '').trim();
+      if (!name) { ui.focus = 'subj-name'; render(); return; }
+      var ns = { id: uid(), name: name.slice(0, 60), exam: ui.drafts['subj-date'] || '', sample: false, topics: [] };
+      state.subjects.push(ns);
+      ui.open[ns.id] = true;
+      ui.adding = false;
+      ui.drafts['subj-name'] = ''; ui.drafts['subj-date'] = '';
+      ui.focus = 'nt-' + ns.id;
+      change();
+    } else if (kind === 'topic') {
+      var sid = f.getAttribute('data-sid');
+      var s = findSub(sid);
+      if (!s) return;
+      var lines = parseTopics(ui.drafts['nt-' + sid] || '');
+      ui.drafts['nt-' + sid] = '';
+      ui.focus = 'nt-' + sid;
+      if (!lines.length) { render(); return; }
+      lines.forEach(function (l) { s.topics.push({ id: uid(), t: l, s: 0 }); });
+      s.sample = false;
+      change();
+    }
+  });
+
+  app.addEventListener('input', function (e) {
+    var el = e.target;
+    var key = el.getAttribute && el.getAttribute('data-draft');
+    if (key) ui.drafts[key] = el.value;
+    if (el.tagName === 'TEXTAREA') autosize(el);
+  });
+
+  app.addEventListener('change', function (e) {
+    var el = e.target;
+    if (el.getAttribute && el.getAttribute('data-change') === 'exam') {
+      var art = el.closest('[data-sid]');
+      var s = art && findSub(art.getAttribute('data-sid'));
+      if (s) { s.exam = el.value; s.sample = false; change(); }
+    }
+  });
+
+  app.addEventListener('keydown', function (e) {
+    if (e.target.tagName === 'TEXTAREA' && e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+      e.preventDefault();
+      var f = e.target.closest('form');
+      if (f && f.requestSubmit) f.requestSubmit();
+      else if (f) f.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+    }
+  });
+
+  render();
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () {}); });
+  }
+})();
+</script>
+
+</body>
+</html>
